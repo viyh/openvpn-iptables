@@ -1,16 +1,19 @@
 /*
  * openvpn-iptables - OpenVPN plugin for per group iptables rules
  *
+ * Install openvpn-dev
+ * Compile with "gcc -fPIC -shared -Wall openvpn-iptables.c -o openvpn-iptables.so"
+ *
  * Copyright (C) 2014 Joe Richards <nospam-github@disconformity.net>
  */
 
 #include <stdio.h>
+#include <sys/wait.h>
 #include <string.h>
 #include <stdlib.h>
 #include <signal.h>
 #include <unistd.h>
-
-#include "openvpn-plugin.h"
+#include <openvpn/openvpn-plugin.h>
 
 struct plugin_context {
     const char *script_path;
@@ -27,7 +30,6 @@ generic_deferred_handler(const char *script_path, const char * argv[], const cha
     int pid;
     struct sigaction sa;
     const char *sc_argv[] = {script_path, 0};
-    char *newargv[] = { NULL, NULL, NULL };
 
     sa.sa_handler = &handle_sigchld;
     sigemptyset(&sa.sa_mask);
@@ -35,8 +37,6 @@ generic_deferred_handler(const char *script_path, const char * argv[], const cha
 
     if (!argv[1] || !argv[2])
         return OPENVPN_PLUGIN_FUNC_ERROR;
-
-    printf("DEBUG netfilter: %s, %s, %s\n", sc_argv[0], argv[1], argv[2]);
 
     if (sigaction(SIGCHLD, &sa, 0) == -1)
         return OPENVPN_PLUGIN_FUNC_ERROR;
