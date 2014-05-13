@@ -28,29 +28,14 @@ static int
 generic_deferred_handler(const char *script_path, const char * argv[], const char * envp[])
 {
     int pid;
-    struct sigaction sa;
-    const char *sc_argv[] = {script_path, 0};
-
-    sa.sa_handler = &handle_sigchld;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-
-    if (!argv[1] || !argv[2])
-        return OPENVPN_PLUGIN_FUNC_ERROR;
-
-    if (sigaction(SIGCHLD, &sa, 0) == -1)
-        return OPENVPN_PLUGIN_FUNC_ERROR;
-
     pid = fork();
-
-    if (pid < 0)
+    if (pid == 0)
+    {
+        execve(script_path, (char *const*)argv, (char *const*)envp);
         return OPENVPN_PLUGIN_FUNC_ERROR;
-
-    if (pid > 0)
-        return OPENVPN_PLUGIN_FUNC_DEFERRED;
-
-    execve(sc_argv[0], (char *const*)argv, (char *const*)envp);
-    exit(127);
+    }
+    else
+        return OPENVPN_PLUGIN_FUNC_ERROR;
 }
 
 
