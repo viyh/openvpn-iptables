@@ -24,8 +24,10 @@ gcc -fPIC -shared -Wall openvpn-iptables.c -o openvpn-iptables.so
 Put the openvpn-iptables.so and openvpn-iptables.py script somewhere, make them executable, and set it up in the OpenVPN server config like so:
 
 ```
-plugin <PATH TO .so MODULE> <PATH TO .py SCRIPT>
+plugin /path/to/plugin/openvpn-iptables.so /path/to/plugin/openvpn-iptables.py
 ```
+
+The path to the python script is passed as an argument to the plugin.
 
 ### Learn-Address script ###
 
@@ -34,7 +36,7 @@ The second way to use it is by having OpenVPN call the python code directly.
 Put the python script somewhere and make it executable. Add a line to your OpenVPN server config such as:
 
 ```
-learn-address <PATH TO .py SCRIPT>
+learn-address /path/to/plugin/openvpn-iptables.py
 ```
 
 ## filter_rules.json ##
