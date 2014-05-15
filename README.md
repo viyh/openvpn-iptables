@@ -1,5 +1,5 @@
-openvpn-iptables
-================
+openvpn-iptables v0.0.1
+=======================
 
 This is an OpenVPN plugin which implements per group IP tables rules. For now, it's a simple C plugin file that calls a python script to do the heavy lifting. For each user that logs in, an iptables chain is created with filter rules specified from a JSON file. If no rules are specified, all traffic for that user is dropped. The chain is removed once OpenVPN determines the user has logged off and the keepalive time expires.
 
