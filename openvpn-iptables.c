@@ -48,8 +48,8 @@ struct rule
 
 struct entry
 {
-    struct ipt_entry *e;
-    struct xt_standard_target t;
+    struct ipt_entry entry;
+    struct xt_standard_target target;
 };
 
 void *
@@ -68,6 +68,36 @@ safe_realloc (void *ptr, size_t size)
     if (value == 0)
         perror("Virtual memory exhausted");
     return value;
+}
+
+/* We want this to be readable, so only print out neccessary fields.
+ * Because that's the kind of world I want to live in.  */
+static void print_rule(const struct ipt_entry *e,
+                       struct xtc_handle *h, const char *chain)
+{
+    const char *target_name;
+
+    printf("openvpn-iptables: \t");
+
+    /* print chain name */
+    printf(" -A %s", chain);
+
+    /* Print IP part. */
+    printf(" -s %s %s", inet_ntoa(e->ip.src), inet_ntoa(e->ip.smsk));
+    printf(" -d %s %s", inet_ntoa(e->ip.dst), inet_ntoa(e->ip.dmsk));
+
+    //    print_proto(e->ip.proto, e->ip.invflags & IPT_INV_PROTO);
+
+    if (e->ip.flags & IPT_F_FRAG)
+        printf(" %s-f ",
+               e->ip.invflags & IPT_INV_FRAG ? "! " : "");
+
+    /* Print target name */
+    target_name = iptc_get_target(e, h);
+    if (target_name && (*target_name != '\0'))
+        printf(" -j %s ", target_name);
+
+    printf("\n");
 }
 
 struct netaddr
@@ -109,143 +139,42 @@ str_to_netaddr(char *ipstr, struct rule *r)
 }
 
 struct ipt_entry *
-create_iptables_entry(const char *src_ip, const char *src_mask,
+create_iptables_entry(const char *table, struct xtc_handle *h,
+                      const char *src_ip, const char *src_mask,
                       const char *dst_ip, const char *dst_mask,
                       const char *target, const char *comment)
 {
-    struct entry *entry = (struct entry *) safe_calloc (1, sizeof (struct entry));
-    struct ipt_entry_match *match_proto, *match_comment;
-    struct ipt_tcp *tcpinfo;
-    struct xt_comment_info *commentinfo;
-    unsigned int size_ipt_entry, size_ipt_entry_match, size_ipt_entry_target, size_ipt_tcp, size_comment_info, total_length;
-
-    size_ipt_entry = XT_ALIGN(sizeof(struct ipt_entry));
-    size_ipt_entry_match = XT_ALIGN(sizeof(struct ipt_entry_match));
-    size_ipt_entry_target = 36;
-    size_ipt_tcp = XT_ALIGN(sizeof(struct ipt_tcp));
-    size_comment_info = XT_ALIGN(sizeof(struct xt_comment_info));
-    total_length =  size_ipt_entry + size_ipt_entry_match * 2 + size_ipt_entry_target + size_ipt_tcp + size_comment_info;
-
-    entry->e = (struct ipt_entry *) safe_calloc(1, total_length);
-    if(entry->e == NULL)
-    {
-        printf("malloc failure");
-        exit(1);
-    }
-
-    entry->e->target_offset = size_ipt_entry + size_ipt_entry_match * 2 + size_ipt_tcp + size_comment_info;
-    entry->e->next_offset = total_length;
-    entry->e->ip.src.s_addr = inet_addr(src_ip);
-    entry->e->ip.smsk.s_addr = inet_addr(src_mask);
-    entry->e->ip.dst.s_addr = inet_addr(dst_ip);
-    entry->e->ip.dmsk.s_addr = inet_addr(dst_mask);
-    // entry.e.ip.proto = r->proto;
-
-    entry->t.target.u.user.target_size = XT_ALIGN (sizeof (struct xt_standard_target));
-    strncpy (entry->t.target.u.user.name, target, sizeof (entry->t.target.u.user.name));
-
-    match_proto = (struct ipt_entry_match *) entry->e->elems;
-    match_proto->u.match_size = size_ipt_entry_match + size_ipt_tcp;
-    strcpy(match_proto->u.user.name, "tcp");
-
-    match_comment = (struct ipt_entry_match *) (entry->e->elems + match_proto->u.match_size);
-    match_comment->u.match_size = sizeof(struct ipt_entry_match) + sizeof(struct xt_comment_info);
-    strcpy(match_comment->u.user.name, "comment");
-    commentinfo = (struct xt_comment_info *)match_comment->data;
-    strcpy(commentinfo->comment, comment);
-
-    tcpinfo = (struct ipt_tcp *)match_proto->data;
-    tcpinfo->spts[0] = ntohs(0);
-    tcpinfo->spts[1] = ntohs(0xE7);
-    tcpinfo->dpts[0] = ntohs(0);
-    tcpinfo->dpts[1] = ntohs(0x1C8);
-
-    printf("DEBUG: adding rule for %s\n", inet_ntoa(entry->e->ip.dst));
-    fflush(stdout);
-
-    return (struct ipt_entry *) entry;
-}
-
-int
-create_iptables_chain(struct xtc_handle *h, const char *table, const struct plugin_context pc)
-{
+    struct entry entry;
     int ret;
 
-    if (!iptc_is_chain(pc.client_ip, h))
-    {
-        printf("Could not find chain!\n");
-        iptc_create_chain(pc.client_ip, h);
-    }
+    memset (&entry, 0, sizeof (struct entry));
 
-    ret = iptc_append_entry ("OUTPUT",
-                             create_iptables_entry(pc.client_ip, "255.255.255.255",
-                                     "0.0.0.0", "0.0.0.0", pc.client_ip, pc.client_name), h);
-    if (!ret)
-    {
-        printf("Could not insert a rule in iptables (table %s): %s\n", table, iptc_strerror (errno));
-        exit(OPENVPN_PLUGIN_FUNC_ERROR);
-    }
+    printf("DEBUG entry:\n\ttable: %s\n\tsrc_ip: %s\n\tsrc_mask: %s\n\t", table, src_ip, src_mask);
+    printf("dst_ip: %s\tdst_mask: %s\n\ttarget: %s\n", dst_ip, dst_mask, target);
 
-    ret = iptc_append_entry ("INPUT",
-                             create_iptables_entry(pc.client_ip, "255.255.255.255",
-                                     "0.0.0.0", "0.0.0.0", pc.client_ip, pc.client_name), h);
-    if (!ret)
-    {
-        printf("Could not insert a rule in iptables (table %s): %s\n", table, iptc_strerror (errno));
-        exit(OPENVPN_PLUGIN_FUNC_ERROR);
-    }
+    /* target */
+    entry.target.target.u.user.target_size = XT_ALIGN (sizeof (struct xt_standard_target));
+    strncpy (entry.target.target.u.user.name, target, sizeof (entry.target.target.u.user.name));
 
-    ret = iptc_append_entry ("FORWARD",
-                             create_iptables_entry(pc.client_ip, "255.255.255.255",
-                                     "0.0.0.0", "0.0.0.0", pc.client_ip, pc.client_name), h);
-    if (!ret)
-    {
-        printf("Could not insert a rule in iptables (table %s): %s\n", table, iptc_strerror (errno));
-        exit(OPENVPN_PLUGIN_FUNC_ERROR);
-    }
+    /* entry */
+    entry.entry.target_offset = sizeof (struct ipt_entry);
+    entry.entry.next_offset = entry.entry.target_offset + entry.target.target.u.user.target_size;
 
+    entry.entry.ip.src.s_addr = inet_addr(src_ip);
+    entry.entry.ip.smsk.s_addr = inet_addr(src_mask);
+    entry.entry.ip.dst.s_addr = inet_addr(dst_ip);
+    entry.entry.ip.dmsk.s_addr = inet_addr(dst_mask);
+    // entry.entry.ip.proto = r->proto;
+
+    printf("DEBUG: adding rule for %s\n", inet_ntoa(entry.entry.ip.dst));
     fflush(stdout);
 
-    return OPENVPN_PLUGIN_FUNC_SUCCESS;
-}
-
-int
-add_iptables_rule(const struct rule *r, const char *table, const struct plugin_context pc)
-{
-    int ret;
-    struct xtc_handle *h;
-
-    h = iptc_init(table);
-    if (!h)
-    {
-        printf("Could not init IPTC library: %s\n", iptc_strerror (errno));
-        exit(OPENVPN_PLUGIN_FUNC_ERROR);
-    }
-
-    if (!iptc_is_chain(pc.client_ip, h))
-    {
-        printf("Could not find chain!\n");
-        create_iptables_chain(h, table, pc);
-    }
-
-    ret = iptc_append_entry (pc.client_ip,
-                             create_iptables_entry(pc.client_ip, "255.255.255.255",
-                                     inet_ntoa(r->dst_net.network), inet_ntoa(r->dst_net.netmask), "ACCEPT", pc.client_name), h);
+    ret = iptc_append_entry(table, (struct ipt_entry *) &entry, h);
     if (!ret)
     {
         printf("Could not insert a rule in iptables (table %s): %s\n", table, iptc_strerror (errno));
         exit(OPENVPN_PLUGIN_FUNC_ERROR);
     }
-
-    if (!iptc_commit (h))
-    {
-        printf("Could not commit changes in iptables (table %s, chain: %s, target: %s): %s\n",
-               table, pc.client_ip, "ACCEPT", iptc_strerror (errno));
-        exit(OPENVPN_PLUGIN_FUNC_ERROR);
-    }
-
-    if (h)
-        iptc_free (h);
 
     return OPENVPN_PLUGIN_FUNC_SUCCESS;
 }
@@ -312,15 +241,15 @@ parse_rule_param(struct rule *r, const char *key, yajl_val val)
     {
         proto = YAJL_GET_STRING(val);
         if (strcmp(proto, "tcp") == 0)
-            r->proto   = IPPROTO_TCP;
+            r->proto = IPPROTO_TCP;
         else if (strcmp(proto, "udp") == 0)
-            r->proto   = IPPROTO_UDP;
+            r->proto = IPPROTO_UDP;
         else
             printf("Invalid protocol %s!\n", YAJL_GET_STRING(val));
     }
     else if (strcmp(key, "comment") == 0)
     {
-        r->comment     = YAJL_GET_STRING(val);
+        r->comment = YAJL_GET_STRING(val);
     }
     else
         printf("Unknown rule parameter: %s\n", key);
@@ -328,22 +257,15 @@ parse_rule_param(struct rule *r, const char *key, yajl_val val)
     return r;
 }
 
-int
-get_group_rules (const yajl_val json, const char *group, const struct plugin_context pc, const char *table)
+struct rule *
+process_group_rules (const yajl_val json, const char *group)
 {
     const char *path[] = { group, "rules", (const char *) 0 };
-    yajl_val group_rules = yajl_tree_get(json, path, yajl_t_array);
+    yajl_val group_rules = yajl_tree_get(json, path, yajl_t_array), val;
     size_t len, rule_len;
     int i, j;
     const char *key;
-    yajl_val val;
-    struct rule *r = safe_calloc(1, sizeof(struct rule));
-
-    if (r == NULL)
-    {
-        printf("openvpn-iptables: rule malloc failure\n");
-        exit(OPENVPN_PLUGIN_FUNC_ERROR);
-    }
+    struct rule *r = (struct rule *) safe_calloc(1, sizeof(struct rule));
 
     if ( !group_rules || !YAJL_IS_ARRAY(group_rules) )
     {
@@ -356,21 +278,22 @@ get_group_rules (const yajl_val json, const char *group, const struct plugin_con
     len = group_rules->u.array.len;
     for (i = 0; i < len; ++i)
     {
+        r = (struct rule *) safe_realloc(r, sizeof(struct rule) * i + 1);
         yajl_val rule = group_rules->u.array.values[i];
         rule_len = rule->u.object.len;
         for (j = 0; j < rule_len; ++j)
         {
             key = rule->u.object.keys[j];
             val = rule->u.object.values[j];
-            parse_rule_param(r, key, val);
+            parse_rule_param(&r[i], key, val);
         }
-        add_iptables_rule(r, table, pc);
     }
     yajl_tree_free(group_rules);
-    return OPENVPN_PLUGIN_FUNC_SUCCESS;
+
+    return r;
 }
 
-gid_t *
+static int
 add_group_rules (const struct plugin_context pc, const char *table)
 {
     int i = 0;
@@ -379,9 +302,10 @@ add_group_rules (const struct plugin_context pc, const char *table)
     struct passwd *pw = getpwnam (pc.client_name);
     struct group *g;
     yajl_val json;
+    struct rule *r;
 
     if (pw == NULL)
-        return NULL;
+        return OPENVPN_PLUGIN_FUNC_ERROR;
 
     if (getgrouplist (pw->pw_name, pw->pw_gid, groups, &ngroups) < 0)
     {
@@ -400,38 +324,126 @@ add_group_rules (const struct plugin_context pc, const char *table)
             printf("gid %d not found\n", groups[i]);
             continue;
         }
-        get_group_rules(json, g->gr_name, pc, table);
+        r = process_group_rules(json, g->gr_name);
+
         i++;
     }
-    return (gid_t *)groups;
+    return OPENVPN_PLUGIN_FUNC_SUCCESS;
+}
+
+int
+create_iptables_base_rules(struct xtc_handle *h, const char *table, const struct plugin_context pc)
+{
+    if (!iptc_is_chain(pc.client_ip, h))
+    {
+        printf("Creating new chain...\n");
+        iptc_create_chain(pc.client_ip, h);
+    }
+
+    create_iptables_entry("OUTPUT", h, pc.client_ip, "255.255.255.255",
+                          "0.0.0.0", "0.0.0.0", pc.client_ip, pc.client_name);
+
+    create_iptables_entry("INPUT", h, pc.client_ip, "255.255.255.255",
+                          "0.0.0.0", "0.0.0.0", pc.client_ip, pc.client_name);
+
+    create_iptables_entry("FORWARD", h, pc.client_ip, "255.255.255.255",
+                          "0.0.0.0", "0.0.0.0", pc.client_ip, pc.client_name);
+
+    fflush(stdout);
+
+    return OPENVPN_PLUGIN_FUNC_SUCCESS;
+}
+
+int
+delete_iptables_client(struct xtc_handle *h, const char *table, const struct plugin_context pc)
+{
+    int ret, rulenum = 1, chainnum = 0;
+    const struct ipt_entry *e;
+    const char *chains[] = { "OUTPUT", "INPUT", "FORWARD", NULL };
+    errno = 0;
+
+    while (chains[chainnum] != NULL)
+    {
+        for (e = iptc_first_rule(chains[chainnum], h), rulenum=1; e; e = iptc_next_rule(e, h), rulenum++)
+        {
+            print_rule(e, h, chains[chainnum]);
+            if (e->ip.src.s_addr == inet_addr(pc.client_ip))
+            {
+                printf("openvpn-iptables: deleting rule number %d in %s.\n", rulenum, chains[chainnum]);
+                ret = iptc_delete_num_entry(chains[chainnum], rulenum-1, h);
+                if (!ret)
+                {
+                    printf("openvpn-iptables: could not delete rule: [%s, %s]\n",
+                        (char*)strerror(errno), iptc_strerror (errno));
+                    exit(OPENVPN_PLUGIN_FUNC_ERROR);
+                }
+
+                fflush(stdout);
+            }
+            break;
+        }
+        chainnum++;
+    }
+
+    if (iptc_is_chain(pc.client_ip, h))
+    {
+        iptc_flush_entries(pc.client_ip, h);
+        ret = iptc_delete_chain(pc.client_ip, h);
+        if (!ret)
+        {
+            printf("openvpn-iptables: could not delete chain!\n");
+            exit(OPENVPN_PLUGIN_FUNC_ERROR);
+        }
+    }
+
+    return OPENVPN_PLUGIN_FUNC_SUCCESS;
+}
+
+int
+add_iptables_client(const struct plugin_context pc, const char *table)
+{
+    struct xtc_handle *h;
+
+    h = iptc_init(table);
+    if (!h)
+    {
+        printf("Could not init IPTC library: %s\n", iptc_strerror (errno));
+        exit(OPENVPN_PLUGIN_FUNC_ERROR);
+    }
+
+    delete_iptables_client(h, table, pc);
+
+    create_iptables_base_rules(h, table, pc);
+
+    // add_group_rules(table, pc);
+
+    if (!iptc_commit (h))
+    {
+        printf("Could not commit changes in iptables (table %s, chain: %s, target: %s): %s, %s\n",
+               table, pc.client_ip, "ACCEPT", (char*)strerror(errno), iptc_strerror (errno));
+        exit(OPENVPN_PLUGIN_FUNC_ERROR);
+    }
+
+    if (h)
+        iptc_free (h);
+
+    return OPENVPN_PLUGIN_FUNC_SUCCESS;
 }
 
 static int
 add_table_entries(const struct plugin_context pc, const char *table)
 {
-    printf("openvpn-iptables: table[%s], operation[add], client_ip[%s], client_name[%s]\n",
+    printf("openvpn-iptables: table[%s], operation[add/update], client_ip[%s], client_name[%s]\n",
            table, pc.client_ip, pc.client_name);
-    add_group_rules(pc, table);
+    add_iptables_client(pc, table);
     return OPENVPN_PLUGIN_FUNC_SUCCESS;
 }
 
 static int
 delete_table_entries(const struct plugin_context pc, const char *table)
 {
-    // struct ipt_entry *e;
-
     printf("openvpn-iptables: table[%s], operation[delete], client_ip[%s]\n",
            table, pc.client_ip);
-    return OPENVPN_PLUGIN_FUNC_SUCCESS;
-}
-
-static int
-update_table_entries(const struct plugin_context pc, const char *table)
-{
-    // struct ipt_entry *e;
-
-    printf("openvpn-iptables: table[%s], operation[update], client_ip[%s], client_name[%s]\n",
-           table, pc.client_ip, pc.client_name);
     return OPENVPN_PLUGIN_FUNC_SUCCESS;
 }
 
@@ -444,7 +456,7 @@ do_tables(char *const argv[], char *const envp[])
     pc.operation = argv[1];
     pc.client_ip = argv[2];
 
-    if (strcmp(argv[1], "add") == 0)
+    if (strcmp(argv[1], "add") == 0 || strcmp(argv[1], "update") == 0)
     {
         pc.client_name = argv[3];
         add_table_entries(pc, table);
@@ -452,11 +464,6 @@ do_tables(char *const argv[], char *const envp[])
     else if (strcmp(argv[1], "delete") == 0)
     {
         delete_table_entries(pc, table);
-    }
-    else if (strcmp(argv[1], "update") == 0)
-    {
-        pc.client_name = argv[3];
-        update_table_entries(pc, table);
     }
     else
     {
