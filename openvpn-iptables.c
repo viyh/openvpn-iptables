@@ -8,6 +8,7 @@
  */
 
 #define FILTER_GROUPS_FILE "/etc/openvpn/filter_groups.json"
+#define TABLE "filter"
 
 #include <stdio.h>
 #include <string.h>
@@ -139,7 +140,7 @@ str_to_netaddr(char *ipstr, struct rule *r)
 }
 
 struct ipt_entry *
-create_iptables_entry(const char *table, struct xtc_handle *h,
+create_iptables_entry(const char *chain, struct xtc_handle *h,
                       const char *src_ip, const char *src_mask,
                       const char *dst_ip, const char *dst_mask,
                       const char *target, const char *comment)
@@ -149,7 +150,7 @@ create_iptables_entry(const char *table, struct xtc_handle *h,
 
     memset (&entry, 0, sizeof (struct entry));
 
-    printf("DEBUG entry:\n\ttable: %s\n\tsrc_ip: %s\n\tsrc_mask: %s\n\t", table, src_ip, src_mask);
+    printf("DEBUG entry:\n\ttable: %s\n\tsrc_ip: %s\n\tsrc_mask: %s\n\t", chain, src_ip, src_mask);
     printf("dst_ip: %s\tdst_mask: %s\n\ttarget: %s\n", dst_ip, dst_mask, target);
 
     /* target */
@@ -169,10 +170,10 @@ create_iptables_entry(const char *table, struct xtc_handle *h,
     printf("DEBUG: adding rule for %s\n", inet_ntoa(entry.entry.ip.dst));
     fflush(stdout);
 
-    ret = iptc_append_entry(table, (struct ipt_entry *) &entry, h);
+    ret = iptc_append_entry(chain, (struct ipt_entry *) &entry, h);
     if (!ret)
     {
-        printf("Could not insert a rule in iptables (table %s): %s\n", table, iptc_strerror (errno));
+        printf("Could not insert a rule in iptables (chain %s): %s\n", chain, iptc_strerror (errno));
         exit(OPENVPN_PLUGIN_FUNC_ERROR);
     }
 
@@ -222,7 +223,7 @@ read_json_file(const char *file)
     return json;
 }
 
-struct rule *
+void
 parse_rule_param(struct rule *r, const char *key, yajl_val val)
 {
     char *proto;
@@ -253,8 +254,6 @@ parse_rule_param(struct rule *r, const char *key, yajl_val val)
     }
     else
         printf("Unknown rule parameter: %s\n", key);
-
-    return r;
 }
 
 struct rule *
@@ -294,7 +293,7 @@ process_group_rules (const yajl_val json, const char *group)
 }
 
 static int
-add_group_rules (const struct plugin_context pc, const char *table)
+add_group_rules (struct xtc_handle *h, const struct plugin_context pc)
 {
     int i = 0;
     int ngroups = 128;
@@ -332,7 +331,7 @@ add_group_rules (const struct plugin_context pc, const char *table)
 }
 
 int
-create_iptables_base_rules(struct xtc_handle *h, const char *table, const struct plugin_context pc)
+create_iptables_base_rules(struct xtc_handle *h, const struct plugin_context pc)
 {
     if (!iptc_is_chain(pc.client_ip, h))
     {
@@ -342,115 +341,143 @@ create_iptables_base_rules(struct xtc_handle *h, const char *table, const struct
 
     create_iptables_entry("OUTPUT", h, pc.client_ip, "255.255.255.255",
                           "0.0.0.0", "0.0.0.0", pc.client_ip, pc.client_name);
-
     create_iptables_entry("INPUT", h, pc.client_ip, "255.255.255.255",
                           "0.0.0.0", "0.0.0.0", pc.client_ip, pc.client_name);
-
     create_iptables_entry("FORWARD", h, pc.client_ip, "255.255.255.255",
                           "0.0.0.0", "0.0.0.0", pc.client_ip, pc.client_name);
+    create_iptables_entry(pc.client_ip, h, pc.client_ip, "255.255.255.255",
+                          "0.0.0.0", "0.0.0.0", "ACCEPT", pc.client_name);
+    create_iptables_entry(pc.client_ip, h, pc.client_ip, "255.255.255.255",
+                          "0.0.0.0", "0.0.0.0", "DROP", pc.client_name);
 
     fflush(stdout);
 
     return OPENVPN_PLUGIN_FUNC_SUCCESS;
 }
 
-int
-delete_iptables_client(struct xtc_handle *h, const char *table, const struct plugin_context pc)
+const struct ipt_entry *
+delete_iptables_rule(struct xtc_handle *h, const char *chain, const int rulenum)
 {
-    int ret, rulenum = 1, chainnum = 0;
-    const struct ipt_entry *e;
-    const char *chains[] = { "OUTPUT", "INPUT", "FORWARD", NULL };
-    errno = 0;
+    int ret;
+    printf("openvpn-iptables: deleting rule number %d in %s.\n", rulenum, chain);
 
-    while (chains[chainnum] != NULL)
+    ret = iptc_delete_num_entry(chain, rulenum, h);
+    if (!ret)
     {
-        for (e = iptc_first_rule(chains[chainnum], h), rulenum=1; e; e = iptc_next_rule(e, h), rulenum++)
-        {
-            print_rule(e, h, chains[chainnum]);
-            if (e->ip.src.s_addr == inet_addr(pc.client_ip))
-            {
-                printf("openvpn-iptables: deleting rule number %d in %s.\n", rulenum, chains[chainnum]);
-                ret = iptc_delete_num_entry(chains[chainnum], rulenum-1, h);
-                if (!ret)
-                {
-                    printf("openvpn-iptables: could not delete rule: [%s, %s]\n",
-                        (char*)strerror(errno), iptc_strerror (errno));
-                    exit(OPENVPN_PLUGIN_FUNC_ERROR);
-                }
-
-                fflush(stdout);
-            }
-            break;
-        }
-        chainnum++;
+        printf("openvpn-iptables: could not delete rule: [%s, %s]\n",
+               (char *)strerror(errno), iptc_strerror (errno));
+        exit(OPENVPN_PLUGIN_FUNC_ERROR);
     }
-
-    if (iptc_is_chain(pc.client_ip, h))
-    {
-        iptc_flush_entries(pc.client_ip, h);
-        ret = iptc_delete_chain(pc.client_ip, h);
-        if (!ret)
-        {
-            printf("openvpn-iptables: could not delete chain!\n");
-            exit(OPENVPN_PLUGIN_FUNC_ERROR);
-        }
-    }
-
-    return OPENVPN_PLUGIN_FUNC_SUCCESS;
+    return iptc_first_rule(chain, h);
 }
 
 int
-add_iptables_client(const struct plugin_context pc, const char *table)
+delete_chain(struct xtc_handle *h, const char *chain)
+{
+    int ret;
+    if (!iptc_is_chain(chain, h))
+        return 0;
+
+    iptc_flush_entries(chain, h);
+    ret = iptc_delete_chain(chain, h);
+    if (!ret)
+    {
+        printf("openvpn-iptables: could not delete chain!\n");
+        exit(OPENVPN_PLUGIN_FUNC_ERROR);
+    }
+    return 0;
+}
+
+struct xtc_handle *
+init_iptables(void)
 {
     struct xtc_handle *h;
+    errno = 0;
 
-    h = iptc_init(table);
+    h = iptc_init(TABLE);
     if (!h)
     {
         printf("Could not init IPTC library: %s\n", iptc_strerror (errno));
         exit(OPENVPN_PLUGIN_FUNC_ERROR);
     }
+    return h;
+}
 
-    delete_iptables_client(h, table, pc);
-
-    create_iptables_base_rules(h, table, pc);
-
-    // add_group_rules(table, pc);
-
+void
+close_iptables(struct xtc_handle *h, const struct plugin_context pc)
+{
     if (!iptc_commit (h))
     {
-        printf("Could not commit changes in iptables (table %s, chain: %s, target: %s): %s, %s\n",
-               table, pc.client_ip, "ACCEPT", (char*)strerror(errno), iptc_strerror (errno));
+        printf("Could not commit changes in iptables (client: %s): %s, %s\n",
+               pc.client_ip, (char *)strerror(errno), iptc_strerror (errno));
         exit(OPENVPN_PLUGIN_FUNC_ERROR);
     }
 
     if (h)
         iptc_free (h);
-
-    return OPENVPN_PLUGIN_FUNC_SUCCESS;
 }
 
-static int
-add_table_entries(const struct plugin_context pc, const char *table)
+int
+delete_iptables_client(const struct plugin_context pc)
 {
-    printf("openvpn-iptables: table[%s], operation[add/update], client_ip[%s], client_name[%s]\n",
-           table, pc.client_ip, pc.client_name);
-    add_iptables_client(pc, table);
-    return OPENVPN_PLUGIN_FUNC_SUCCESS;
-}
+    const char *chain;
+    int rulenum;
+    errno = 0;
 
-static int
-delete_table_entries(const struct plugin_context pc, const char *table)
-{
+    struct xtc_handle *h;
+    h = init_iptables();
+
     printf("openvpn-iptables: table[%s], operation[delete], client_ip[%s]\n",
-           table, pc.client_ip);
+           TABLE, pc.client_ip);
+
+    /* delete iptables rules matching client src from any chain */
+    for (chain = iptc_first_chain(h); chain; chain = iptc_next_chain(h))
+    {
+        const struct ipt_entry *e;
+        rulenum = 0;
+        e = iptc_first_rule(chain, h);
+        while (e)
+        {
+            if (e->ip.src.s_addr == inet_addr(pc.client_ip))
+            {
+                e = delete_iptables_rule(h, chain, rulenum);
+                rulenum = 0;
+            }
+            else
+            {
+                e = iptc_next_rule(e, h);
+                rulenum++;
+            }
+        }
+    }
+
+    delete_chain(h, pc.client_ip);
+
+    close_iptables(h, pc);
+    return OPENVPN_PLUGIN_FUNC_SUCCESS;
+}
+
+int
+add_iptables_client(const struct plugin_context pc)
+{
+    struct xtc_handle *h;
+    h = init_iptables();
+
+    printf("openvpn-iptables: operation[add/update], \
+           client_ip[%s], client_name[%s]\n",
+           pc.client_ip, pc.client_name);
+
+    delete_iptables_client(pc);
+    create_iptables_base_rules(h, pc);
+    // add_group_rules(h, pc);
+
+    close_iptables(h, pc);
     return OPENVPN_PLUGIN_FUNC_SUCCESS;
 }
 
 static int
 do_tables(char *const argv[], char *const envp[])
 {
-    const char *table = "filter";
     struct plugin_context pc;
 
     pc.operation = argv[1];
@@ -459,11 +486,11 @@ do_tables(char *const argv[], char *const envp[])
     if (strcmp(argv[1], "add") == 0 || strcmp(argv[1], "update") == 0)
     {
         pc.client_name = argv[3];
-        add_table_entries(pc, table);
+        add_iptables_client(pc);
     }
     else if (strcmp(argv[1], "delete") == 0)
     {
-        delete_table_entries(pc, table);
+        delete_iptables_client(pc);
     }
     else
     {
