@@ -122,7 +122,10 @@ def main():
     client_ip     = sys.argv[2]
     client_name   = sys.argv[3] if operation != 'delete' else 'none'
 
-    sys.stderr.write("new client, [%s] [%s]\n" % (operation, client_ip))
+    if operation == "add":
+        sys.stderr.write("change, [%s] %s@%s\n" % (operation, client_name, client_ip))
+    else:
+        sys.stderr.write("change, [%s] [%s]\n" % (operation, client_ip))
 
     chain_func = {
         'add':    add_chain,
