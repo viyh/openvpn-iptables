@@ -66,7 +66,7 @@ def load_rules(client_ip, client_name):
     return ';'.join(matched_groups)
 
 def iptables(args, raiseEx=True):
-    command = "%s -w %s" % (config['iptables'], args)
+    command = "%s %s" % (config['iptables'], args)
     print command
     status = os.system(command)
     if status == -1:
