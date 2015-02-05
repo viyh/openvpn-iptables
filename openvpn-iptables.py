@@ -5,7 +5,7 @@ import os
 import json
 
 config = {
-    'iptables': '/sbin/iptables',
+    'iptables': 'sudo /sbin/iptables',
     'rule_file': 'filter_groups.json'
 }
 
