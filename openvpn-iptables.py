@@ -55,9 +55,9 @@ def load_rules(client_ip, client_name):
             comment = rule['comment'] if rule.has_key('comment') else None
             build_rule(client_ip, client_ip, dst_ip, dst_port, proto, comment)
 
-    # Support setting routes
-    if "__EVERYONE__" in group_rules:
-        for rule in group_rules["__EVERYONE__"]["rules"]:
+    # Support defaults if set in filter_rules.json
+    if "__DEFAULT__" in group_rules:
+        for rule in group_rules["__DEFAULT__"]["rules"]:
             dst_ip = rule['dst_ip'] if rule.has_key('dst_ip') else None
             dst_port = rule['dst_port'] if rule.has_key('dst_port') else None
             proto = rule['proto'] if rule.has_key('proto') else None

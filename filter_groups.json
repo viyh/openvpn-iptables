@@ -1,42 +1,50 @@
 {
-    "bob": {
-        "rules": [
-            {
-                "dst_ip": "127.11.11.11",
-                "dst_port": "1433",
-                "proto": "tcp",
-                "comment": "test mssql"
-            },
-            {
-                "dst_ip": "127.12.12.12",
-                "dst_port": "3306",
-                "proto": "tcp",
-                "comment": "test mysql"
-            }
-        ]
-    },
-    "joe": {
-        "rules": [
-            {
-                "dst_ip": "127.9.9.9",
-                "dst_port": "1433",
-                "proto": "tcp",
-                "comment": "test mssql"
-            },
-            {
-                "dst_ip": "127.10.10.10/28",
-                "dst_port": "3306",
-                "proto": "tcp",
-                "comment": "test mysql"
-            }
-        ]
-    },
-    "adm": {
-        "rules": [
-            {
-                "dst_ip": "0.0.0.0/0",
-                "comment": "all traffic"
-            }
-        ]
-    }
+  "__DEFAULT__": {
+    "rules": [
+      {
+        "comment": "everyone",
+        "dst_ip": "10.5.0.0/24"
+      }
+    ]
+  },
+  "admin": {
+    "rules": [
+      {
+        "comment": "all traffic",
+        "dst_ip": "0.0.0.0/0"
+      }
+    ]
+  },
+  "bob": {
+    "rules": [
+      {
+        "comment": "test mssql",
+        "dst_ip": "127.11.11.11",
+        "dst_port": "1433",
+         "proto": "tcp"
+      },
+      {
+        "comment": "test mysql",
+        "dst_ip": "127.12.12.12",
+        "dst_port": "3306",
+        "proto": "tcp"
+      }
+    ]
+  },
+  "joe": {
+    "rules": [
+      {
+        "comment": "test mssql",
+        "dst_ip": "127.9.9.9",
+        "dst_port": "1433",
+        "proto": "tcp"
+      },
+      {
+        "comment": "test mysql",
+        "dst_ip": "127.10.10.10/28",
+        "dst_port": "3306",
+        "proto": "tcp"
+      }
+    ]
+  }
 }

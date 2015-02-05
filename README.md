@@ -70,6 +70,24 @@ An example would look like the following:
 
 Any member of the dbagroup on your system would get access to any host in 172.16.0.0/16 on port 1433. Any member of admins have access to the 10.0.0.0/8 network. And any user that is a member of both groups would have access to both of those networks. If a dst_port is specified, a proto must also be specified. Another example of the filter_groups.json file is included in the source distribution.
 
+
+### Defaults ###
+
+Sometimes you want to push routes irrespective of a users group affiliation.  This is optional and can be done by setting a `__DEFAULT__` top level key in the filter_rules.json
+
+```json
+{
+  "__DEFAULT__": {
+    "rules": [
+      {
+        "comment": "everyone",
+        "dst_ip": "10.5.0.0/24"
+      }
+    ]
+  }
+}
+```
+
 ## Credits ##
 
 This module was inspired by the code here: https://github.com/gdestuynder/openvpn-netfilter
